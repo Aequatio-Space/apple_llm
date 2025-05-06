@@ -557,7 +557,7 @@ def linear_to_lora_layers(
                 f"Can't convert layer of type {type(layer).__name__} to LoRA"
             )
 
-        return LoRALayer.from_linear(
+        return LoRALayer.from_base(
             layer,
             r=config["rank"],
             scale=config["scale"],

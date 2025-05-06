@@ -1,4 +1,4 @@
-# Modified by Andrew Silva from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py
+# Modified from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py
 #
 # Copyright 2022 The HuggingFace Team. All rights reserved.
 #

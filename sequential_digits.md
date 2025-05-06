@@ -148,7 +148,6 @@ Options for this script include:
 * `--reward_model` -- Path to the learned reward model.
 * `--save_file` -- File to save the adapter or prompts to.
 * `--resume_file` -- File to load in the pre-trained adapter or prompts from.
-* `--use_peft` -- NOT SUPPORTED -- To-do is to actually support this, but ignore it for now.
 
 **To reproduce my results with MLX:**
 ```bash

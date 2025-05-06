@@ -49,19 +49,3 @@ This is the launcher script for running RLHF/RLAIF with MLX, using the `mlx_ppo_
 
 ### `talk_to_model.py`
 This loads in a pretrained model with MLX-LM and runs it in the terminal for you to live-chat with the model. Good for testing out how well things are working.
-
-
-## To-Do
-
-There are a few areas left open for me (or you!) to patch in:
-
-- [ ] Improve the efficiency of the reward-loss computation (it could be batched)
-- [x] Add/switch to QLoRA for more memory efficiency and faster learning
-- [ ] Generally improve the integration with `mlx-lm` for more base models and PEFT methods.
-- [ ] Address #TODOs in the code (add command line args/config parameters for various hard-coded variables)
-- [ ] Fix the way we're logging text to W&B (currently generating thousands of artifacts)
-- [ ] Run an end-to-end example with a learned reward model for the sequential digit task
-- [ ] Generate preference data for the iMessage example by using an LLM for negative examples
-- [ ] Add different preference-tuning approaches (such as DPO) for comparison
-- [ ] Run the sequential digit and iMessage examples with soft-prompts
-- [ ] Run the sequential digit and iMessage examples with full-model fine-tuning

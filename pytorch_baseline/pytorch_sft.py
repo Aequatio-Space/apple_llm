@@ -1,4 +1,4 @@
-# Modified by Andrew Silva from https://github.com/ml-explore/mlx-examples/blob/main/lora/lora.py
+# Modified by Charlie Fang from https://github.com/ml-explore/mlx-examples/blob/main/lora/lora.py
 #
 # Copyright © 2023 Apple Inc.
 import os

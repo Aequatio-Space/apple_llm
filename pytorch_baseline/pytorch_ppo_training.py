@@ -1,5 +1,5 @@
 # coding=utf-8
-# Modified by Andrew Silva from https://github.com/huggingface/trl/blob/main/examples/research_projects/stack_llama/scripts/rl_training.py
+# Modified by Charlie Fang from https://github.com/huggingface/trl/blob/main/examples/research_projects/stack_llama/scripts/rl_training.py
 #
 # Copyright 2023 The HuggingFace Inc. team. All rights reserved.
 #
