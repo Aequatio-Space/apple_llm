@@ -26,7 +26,7 @@ import numpy as np
 import mlx.core as mx
 import mlx.nn as nn
 import mlx.optimizers as optim
-from mlx_lm.utils import generate
+from mlx_lm.generate import generate
 
 from models.base import create_reference_model
 

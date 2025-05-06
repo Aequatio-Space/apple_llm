@@ -21,6 +21,7 @@ from mlx_lm.utils import quantize_model
 from models.prompt_tuning import PromptTuning
 import models.llama as llama
 import models.mixtral as mixtral
+import models.qwen as qwen
 
 import numpy as np
 import transformers
@@ -31,6 +32,7 @@ MODEL_MAPPING = {
     "llama": llama,
     "mistral": llama,  # mistral is compatible with llama
     "mixtral": mixtral,
+    "qwen2": qwen,
 }
 
 
