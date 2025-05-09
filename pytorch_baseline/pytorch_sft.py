@@ -224,6 +224,8 @@ if __name__ == "__main__":
     np.random.seed(args.seed)
 
     DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    if torch.backends.mps.is_available():
+        DEVICE = torch.device('mps')
 
     print("Loading pretrained model")
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer if args.tokenizer is not None else args.model)
