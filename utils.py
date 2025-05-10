@@ -622,7 +622,7 @@ def get_model_and_tokenizer(args_in, need_generate: bool = False, add_peft: bool
         q_bits = 4
         weights, _ = quantize_model(model, {}, q_group_size, q_bits)
 
-    if args_in.resume_file is not None:
+    if args_in.resume_file is not None and Path(args_in.resume_file).exists():
         print(f"Loading pretrained weights from {args_in.resume_file}")
         model.load_weights(args_in.resume_file, strict=False)
 
