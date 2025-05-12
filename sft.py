@@ -350,13 +350,112 @@ def setup_logger(train_args) -> tuple:
     return log_file, current_date
 
 
-def generate_text(model, inputs, max_length=512, temp=0.0):
-    generated_tokens = []
-    for token in model.generate(inputs, temp):
-        generated_tokens.append(token)
-        if len(generated_tokens) >= max_length:
+def generate_text(model, inputs, tokenizer, max_length=512, temp=1.0,
+                  top_k=40, top_p=0.95, eos_token_id=None):
+    """
+    使用更高级的采样策略生成文本，支持批处理
+
+    参数:
+        model: 训练好的模型
+        inputs: 输入张量，形状为 [batch_size, seq_len]
+        tokenizer: 用于解码的tokenizer
+        max_length: 最大生成长度
+        temp: 温度参数，控制随机性
+        top_k: top-k采样的k值
+        top_p: top-p采样的p值
+        eos_token_id: 结束标记的token ID
+    """
+    # 获取结束标记ID（如果未指定，则从tokenizer获取）
+    if eos_token_id is None and hasattr(tokenizer, 'eos_token_id'):
+        eos_token_id = tokenizer.eos_token_id
+
+    batch_size = inputs.shape[0]
+    generated = inputs
+    eos_found = [False] * batch_size  # 跟踪每个样本是否已生成EOS
+
+    for _ in range(max_length):
+         # 模型推理，获取logits、新的cache和value
+        logits, _, _ = model(generated)  # 只需要logits
+        logits = logits[:, -1, :]  # 获取最后一个位置的logits
+
+        # 采样策略
+        if temp > 0:
+            # 应用温度缩放
+            logits = logits / temp
+
+            # Top-k采样
+            if top_k > 0:
+                # MLX的sort默认升序，所以取负号实现降序
+                sorted_logits = mx.sort(-logits, axis=-1)  # 注意这里取负号
+                sorted_logits = -sorted_logits  # 恢复原始值
+                kth_value = sorted_logits[:, top_k - 1:top_k]  # 获取第k大的值
+                indices_to_remove = logits < kth_value
+                logits = logits - 1e10 * indices_to_remove  # 将低于阈值的logits设为负无穷
+
+            # Top-p采样（核采样）
+            if top_p < 1.0:
+                # MLX的sort默认升序，所以取负号实现降序
+                sorted_logits = mx.sort(-logits, axis=-1)
+                sorted_logits = -sorted_logits  # 恢复原始值
+                sorted_indices = mx.argsort(-logits, axis=-1)  # 注意这里取负号
+
+                cumulative_probs = mx.cumsum(mx.softmax(sorted_logits, axis=-1), axis=-1)
+
+                # 移除累积概率超过阈值的token
+                sorted_indices_to_remove = cumulative_probs > top_p
+                # 保留第一个token（即使超过阈值）
+                sorted_indices_to_remove = mx.concatenate([
+                    mx.zeros_like(sorted_indices_to_remove[..., :1]),
+                    sorted_indices_to_remove[..., 1:]
+                ], axis=-1)
+
+                # 将被移除的token的logits设为负无穷
+                indices_to_remove = mx.zeros_like(logits)
+                # 为每个样本手动应用掩码
+                for i in range(batch_size):
+                    # 获取当前样本的排序索引和掩码
+                    sample_indices = sorted_indices[i]
+                    sample_mask = sorted_indices_to_remove[i]
+
+                    # 将掩码应用到原始索引位置
+                    for j in range(len(sample_indices)):
+                        if sample_mask[j].item():
+                            indices_to_remove[i, sample_indices[j]] = True
+
+                logits = logits - 1e10 * indices_to_remove
+
+            # 应用softmax获取概率分布
+            probs = mx.softmax(logits, axis=-1)
+            # 从分布中采样
+            next_tokens = mx.random.categorical(probs)
+        else:
+            # 贪婪解码（温度为0）
+            next_tokens = mx.argmax(logits, axis=-1)
+
+        # 将采样的token添加到生成序列中
+        generated = mx.concatenate([generated, next_tokens[:, None]], axis=1)
+
+        # 检查是否生成了EOS token
+        if eos_token_id is not None:
+            for i in range(batch_size):
+                if not eos_found[i] and next_tokens[i].item() == eos_token_id:
+                    eos_found[i] = True
+
+        # 如果所有样本都生成了EOS token，则提前结束
+        if all(eos_found):
             break
-    return generated_tokens
+
+    # 转换为NumPy数组并移除输入部分
+    generated_np = generated.to_numpy()
+    inputs_np = inputs.to_numpy()
+    generated_sequences = []
+
+    for i in range(batch_size):
+        # 提取生成的部分（不包括输入）
+        generated_part = generated_np[i][len(inputs_np[i]):]
+        generated_sequences.append(generated_part)
+
+    return generated_sequences
 
 
 def evaluate_metrics(mdl, val_set, tok, train_args):
@@ -371,7 +470,7 @@ def evaluate_metrics(mdl, val_set, tok, train_args):
         inputs, targets = batch[:2]  # 获取输入和目标
 
         # 生成模型预测（使用改进的生成函数）
-        generated = generate_text(mdl, inputs,
+        generated = generate_text(mdl, inputs, tok,
                                   max_length=train_args.max_gen_length,
                                   temp=train_args.temp)
 
