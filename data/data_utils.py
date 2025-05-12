@@ -6,6 +6,7 @@ from random import shuffle
 import argparse
 
 
+
 class TuningDataset:
     """
     Light-weight wrapper to hold lines from a jsonl file
@@ -18,10 +19,15 @@ class TuningDataset:
         else:
             with open(path, "r") as fid:
                 self._data = [json.loads(l) for l in fid]
+        example_data = self._data[0] if self._data else {}
+        self.standard_sft = 'input' in example_data and 'target' in example_data
         self._key = key
 
     def __getitem__(self, idx: int):
-        return self._data[idx][self._key]
+        if self.standard_sft:
+            return self._data[idx]['input'], self._data[idx]['target']
+        else:
+            return self._data[idx][self._key]
 
     def __len__(self):
         return len(self._data)

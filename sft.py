@@ -54,6 +54,8 @@ def loss(mdl, inputs, targets, lengths):
         # Cast back to mlx
         length_mask = mx.array(np_len)
 
+    # check if input and targets are the same length
+    # if inputs.shape[1] != targets.shape[1]:
     # Calculate the loss
     ce = nn.losses.cross_entropy(logits, targets) * length_mask
     ntoks = length_mask.sum()
@@ -121,20 +123,29 @@ def iterate_batches(dset, tok, batch_size, train_mode=False, reward_modeling=Fal
                     batch = mx.array(batch_arr)
                     targets = mx.array(label_arr)
                 else:
-                    batch = [tok.encode(dset[indices[i + j]]) for j in range(batch_size)]
+                    samples = [dset[indices[i + j]] for j in range(batch_size)]
+
+                    # 分离输入和目标
+                    if dset.standard_sft:
+                        inputs = [sample[0] for sample in samples]
+                        targets = [sample[1] for sample in samples]
+                    else:
+                        inputs = samples
+                        targets = samples
+
+                    # 批量编码（利用fast tokenizer的并行能力）
+                    encoding = tok(inputs, padding="longest", truncation=True, max_length=2048, return_tensors="np")
+                    batch = mx.array(encoding["input_ids"])
                     lengths = [len(x) for x in batch]
 
-                    # Check if any sequence is longer than 2048 tokens
-                    if max(lengths) > 2048:
+                    # 对目标文本进行同样的批量处理
+                    target_encoding = tok(targets, padding="longest", truncation=True, max_length=2048,
+                                          return_tensors="np")
+                    targets = mx.array(target_encoding["input_ids"])
+
+                    # 检查超长序列
+                    if encoding["input_ids"].shape[1] > 2048 or target_encoding["input_ids"].shape[1] > 2048:
                         print(len_warning_message)
-
-                    # Pad to the max length
-                    batch_arr = np.zeros((batch_size, max(lengths)), np.int32)
-
-                    for j in range(batch_size):
-                        batch_arr[j, : lengths[j]] = batch[j]
-                    batch = mx.array(batch_arr)
-                    targets = batch
                 yield batch[:, :-1], targets[:, 1:], mx.array(lengths)
 
         if not train_mode:
