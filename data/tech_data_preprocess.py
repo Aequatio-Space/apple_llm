@@ -2,17 +2,18 @@ import pyarrow.parquet as pq
 import json
 import argparse
 from pathlib import Path
-import pandas as pd
+from transformers import AutoTokenizer
 
 
-def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000):
+def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000, model_name="meta-llama/Llama-2-7b-hf"):
     """
-    从Parquet文件中提取指定字段并保存为JSONL格式
+    从Parquet文件中提取指定字段并保存为JSONL格式，同时构建对话模板
 
     参数:
     input_path (str): 输入Parquet文件路径
     output_path (str, optional): 输出JSONL文件路径，默认为None(自动生成)
     batch_size (int): 每次处理的行数，用于内存优化
+    model_name (str): 用于构建对话模板的模型名称
     """
     # 确保输入文件存在
     input_file = Path(input_path)
@@ -27,6 +28,10 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000):
     selected_fields = ["text", "keywords", "topic"]
 
     try:
+        # 加载tokenizer用于构建对话模板
+        print(f"加载tokenizer: {model_name}")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+
         # 打开Parquet文件
         parquet_file = pq.ParquetFile(input_path)
 
@@ -48,11 +53,34 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000):
 
                 # 处理每一行并写入JSONL
                 for _, row in df.iterrows():
+                    # 构建对话模板
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": "You will receive a text. Your task is to extract keywords and topic from it."
+                        },
+                        {
+                            "role": "user",
+                            "content": str(row["text"])  # 确保text为字符串类型
+                        }
+                    ]
+
+                    # 使用tokenizer的对话模板功能
+                    try:
+                        # 构建包含特殊标记的输入文本
+                        input_text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    except Exception as e:
+                        # 如果tokenizer不支持apply_chat_template，手动构建
+                        print(f"警告: tokenizer不支持apply_chat_template，使用手动构建: {e}")
+                        input_text = f"<|system|>\n{messages[0]['content']}</s><|user|>\n{messages[1]['content']}</s><|assistant|>"
+
+                    # 构建目标输出: "Keywords: XXX, Topic: XXX"
+                    target_text = f"Keywords: {row['keywords']}, Topic: {row['topic']}"
+
                     # 创建输出记录
                     record = {
-                        "text": str(row["text"]),  # 确保text字段为字符串类型
-                        "keywords": row["keywords"],
-                        "topic": row["topic"]
+                        "input": input_text,
+                        "target": target_text
                     }
 
                     # 写入JSONL格式
@@ -74,13 +102,14 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000):
 
 if __name__ == "__main__":
     # 创建命令行参数解析器
-    parser = argparse.ArgumentParser(description='将Parquet文件转换为JSONL格式')
+    parser = argparse.ArgumentParser(description='将Parquet文件转换为JSONL格式，添加对话模板')
     parser.add_argument('--input', required=True, help='输入Parquet文件路径')
     parser.add_argument('--output', help='输出JSONL文件路径(可选)')
     parser.add_argument('--batch-size', type=int, default=1000, help='每次处理的行数(默认1000)')
+    parser.add_argument('--model', default="TinyLlama/TinyLlama-1.1B-Chat-v1.0", help='用于对话模板的模型名称')
 
     # 解析命令行参数
     args = parser.parse_args()
 
     # 执行转换
-    process_parquet_to_jsonl(args.input, args.output, args.batch_size)
+    process_parquet_to_jsonl(args.input, args.output, args.batch_size, args.model)
