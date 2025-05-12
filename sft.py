@@ -4,8 +4,12 @@
 import math
 import time
 from typing import Union
+import logging
+from datetime import datetime
 from pathlib import Path
 from data.data_utils import load_datasets, build_parser
+from rouge import Rouge
+import nltk
 import matplotlib.pyplot as plt
 
 import mlx.core as mx
@@ -51,7 +55,7 @@ def loss(mdl, inputs, targets, input_lengths, target_lengths=None):
         target_lengths = input_lengths
 
     # 运行模型获取logits
-    logits = mdl(inputs)
+    logits, _, _ = mdl(inputs)
 
     # 确保logits和targets的维度匹配
     if logits.shape[1] > targets.shape[1]:
@@ -181,7 +185,8 @@ def evaluate(mdl, dataset, loss_fn, tok, train_args):
     for it, batch in zip(
             range(train_args.val_batches),
             iterate_batches(dataset, tok, train_args.batch_size,
-                            reward_modeling=train_args.reward_model, chat_data=train_args.data_base == 'chat'),
+                            reward_modeling=train_args.reward_model,
+                            chat_data=train_args.data_base == 'chat'),
     ):
         losses, toks = loss_fn(mdl, *batch)
         all_losses.append((losses * toks).item())
@@ -199,14 +204,25 @@ def save_adapter(
 
 
 def train(mdl, train_ds, val_set, optimizer, loss_fn, tok, train_args):
-    # Create value and grad function for loss
+    # 创建日志记录器
+    log_file, current_date = setup_logger(train_args)
+
+    # 确保nltk数据已下载
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
+
+    # 创建损失函数的值和梯度计算函数
     loss_value_and_grad = nn.value_and_grad(mdl, loss_fn)
 
-    losses = []
-    val_losses = []
+    # 初始化记录器
+    losses = []  # 训练损失
+    val_losses = []  # 验证损失
+    rouge_scores = []  # ROUGE分数
     n_tokens = 0
 
-    # Main training loop
+    # 主训练循环
     start = time.perf_counter()
     for it, batch in zip(
             range(train_args.iters),
@@ -215,65 +231,223 @@ def train(mdl, train_ds, val_set, optimizer, loss_fn, tok, train_args):
                             chat_data=train_args.data_base == 'chat'),
     ):
 
-        # Forward and backward pass
+        # 前向和反向传播
         (lvalue, toks), grad = loss_value_and_grad(mdl, *batch)
 
-        # Model update
+        # 模型更新
         optimizer.update(mdl, grad)
         mx.eval(mdl.parameters(), optimizer.state, lvalue)
 
-        # Record loss
+        # 记录损失
         losses.append(lvalue.item())
         n_tokens += toks.item()
 
-        # Report training loss if needed
+        # 定期报告训练损失
         if (it + 1) % train_args.steps_per_report == 0:
             train_loss = np.mean(losses[-train_args.steps_per_report:])
 
             stop = time.perf_counter()
-            print(
+            log_message = (
                 f"Iter {it + 1}: Train loss {train_loss:.3f}, "
                 f"It/sec {train_args.steps_per_report / (stop - start):.3f}, "
                 f"Tokens/sec {float(n_tokens) / (stop - start):.3f}"
             )
+            logging.info(log_message)
             n_tokens = 0
             start = time.perf_counter()
 
-        # Report validation loss if needed
+        # 定期进行验证并计算评估指标
         if (it == 0 or (it + 1) % train_args.steps_per_eval == 0) and val_set is not None:
             stop = time.perf_counter()
+
+            # 计算验证损失
             val_loss = evaluate(
                 mdl, val_set, loss_fn, tok, train_args
             )
-            print(
-                f"Iter {it + 1}: "
-                f"Val loss {val_loss:.3f}, "
-                f"Val took {(time.perf_counter() - stop):.3f}s"
-            )
             val_losses.append(val_loss)
+
+            # 计算ROUGE和BLEU分数
+            if train_args.calculate_metrics:
+                rouge_score = evaluate_metrics(
+                    mdl, val_set, tok, train_args
+                )
+                rouge_scores.append(rouge_score)
+
+                # 记录评估结果
+                log_message = (
+                    f"Iter {it + 1}: "
+                    f"Val loss {val_loss:.3f}, "
+                    f"ROUGE-L: {rouge_score['rouge-l']['f']:.4f}, "
+                    f"Val took {(time.perf_counter() - stop):.3f}s"
+                )
+                logging.info(log_message)
+            else:
+                log_message = (
+                    f"Iter {it + 1}: "
+                    f"Val loss {val_loss:.3f}, "
+                    f"Val took {(time.perf_counter() - stop):.3f}s"
+                )
+                logging.info(log_message)
 
             start = time.perf_counter()
 
-        # Save prompt weights if needed
+        # 定期保存模型
         if (it + 1) % train_args.save_every == 0:
             save_adapter(model, train_args.save_file)
             checkpoint = (
                     Path(train_args.save_file).parent / f"{it:07d}_adapters.safetensors"
             )
             save_adapter(model, checkpoint)
-            print(
+            log_message = (
                 f"Iter {it}: Saved adapter weights to "
                 f"{train_args.save_file} and {checkpoint}."
             )
+            logging.info(log_message)
+
+    # 确定文件名前缀
     fn = ''
     if train_args.prompt_tuning:
         fn += 'prompt_tuning_'
     else:
         fn += 'lora_'
+
+    # 绘制并保存所有指标曲线
+    plot_and_save_metrics(
+        losses, val_losses, rouge_scores,
+        f'{fn}training_metrics_{current_date}.png', train_args
+    )
+
+    logging.info(f"训练完成，日志保存到: {log_file}")
+
+
+def setup_logger(train_args) -> tuple:
+    """配置日志记录器，将日志输出到文件和控制台"""
+    # 获取当前日期
+    current_date = datetime.now().strftime("%Y%m%d-%H%M")
+
+    # 从save_file获取基础名称
+    base_name = Path(train_args.save_file).stem
+
+    # 构建日志文件名: 日期+基础名称+".log"
+    log_dir = Path(train_args.save_file).parent
+    log_file = log_dir / f"{current_date}_{base_name}.log"
+
+    # 创建日志目录(如果不存在)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+
+    # 记录训练配置
+    logging.info(f"训练配置: {vars(train_args)}")
+    return log_file, current_date
+
+
+def generate_text(model, inputs, max_length=512, temp=0.0):
+    generated_tokens = []
+    for token in model.generate(inputs, temp):
+        generated_tokens.append(token)
+        if len(generated_tokens) >= max_length:
+            break
+    return generated_tokens
+
+
+def evaluate_metrics(mdl, val_set, tok, train_args):
+    """计算验证集上的ROUGE和BLEU指标"""
+    references = []
+    predictions = []
+
+    # 生成预测结果
+    for batch in iterate_batches(val_set, tok, train_args.batch_size,
+                                 train_mode=False, reward_modeling=train_args.reward_model,
+                                 chat_data=train_args.data_base == 'chat'):
+        inputs, targets = batch[:2]  # 获取输入和目标
+
+        # 生成模型预测（使用改进的生成函数）
+        generated = generate_text(mdl, inputs,
+                                  max_length=train_args.max_gen_length,
+                                  temp=train_args.temp)
+
+        # 批量解码生成的文本
+        generated_np = np.array([gen_tokens for gen_tokens in generated]).T
+        pred_texts = tok.batch_decode(generated_np, skip_special_tokens=True)
+
+        # 批量解码目标文本
+        targets_np = [np.array(t) for t in targets]
+        target_texts = tok.batch_decode(targets_np, skip_special_tokens=True)
+
+        # 确保预测和参考长度一致
+        if len(pred_texts) != len(target_texts):
+            min_len = min(len(pred_texts), len(target_texts))
+            pred_texts = pred_texts[:min_len]
+            target_texts = target_texts[:min_len]
+
+        references.extend(target_texts)
+        predictions.extend(pred_texts)
+
+    # 计算ROUGE分数
+    # print shape of first item in predictions and references
+    logging.info(f"Predictions sample: {predictions[0]}")
+    logging.info(f"References sample: {references[0]}")
+    rouge = Rouge()
+    try:
+        rouge_score = rouge.get_scores(predictions, references, avg=True)
+    except Exception as e:
+        logging.warning(f"ROUGE计算出错: {e}")
+        rouge_score = {'rouge-1': {'f': 0, 'p': 0, 'r': 0},
+                       'rouge-2': {'f': 0, 'p': 0, 'r': 0},
+                       'rouge-l': {'f': 0, 'p': 0, 'r': 0}}
+
+    return rouge_score
+
+
+def plot_and_save_metrics(losses, val_losses, rouge_scores, filename, train_args):
+    """绘制并保存所有训练指标"""
+    plt.figure(figsize=(15, 10))
+
+    # 绘制训练损失
+    plt.subplot(2, 2, 1)
     plt.plot(losses)
-    plt.savefig(f'{fn}train_losses.png')
-    plt.plot(val_losses)
-    plt.savefig(f'{fn}val_losses.png')
+    plt.title('Training Loss')
+    plt.xlabel('Iterations')
+    plt.ylabel('Loss')
+    x_vals = [i for i in range(0, train_args.iters + train_args.steps_per_eval,
+                               train_args.steps_per_eval)]
+
+    # 绘制验证损失
+    if val_losses:
+        plt.subplot(2, 2, 2)
+
+        if len(x_vals) > len(val_losses):
+            x_vals = x_vals[:len(val_losses)]
+        plt.plot(x_vals, val_losses)
+        plt.title('Validation Loss')
+        plt.xlabel('Iterations')
+        plt.ylabel('Loss')
+
+    # 绘制ROUGE分数
+    if rouge_scores:
+        plt.subplot(2, 2, 3)
+        if len(x_vals) > len(rouge_scores):
+            x_vals = x_vals[:len(rouge_scores)]
+
+        # 提取ROUGE-L的F1分数
+        rouge_l_f1 = [score['rouge-l']['f'] for score in rouge_scores]
+        plt.plot(x_vals, rouge_l_f1)
+        plt.title('ROUGE-L F1 Score')
+        plt.xlabel('Iterations')
+        plt.ylabel('Score')
+
+    plt.tight_layout()
+    plt.savefig(filename)
+    print(f"Metrics plot saved to {filename}")
 
 
 if __name__ == "__main__":
@@ -282,7 +456,7 @@ if __name__ == "__main__":
 
     np.random.seed(args.seed)
 
-    model, tokenizer = get_model_and_tokenizer(args)
+    model, tokenizer = get_model_and_tokenizer(args, need_generate=True)
 
     print("Loading datasets")
     train_set, valid_set, test_set = load_datasets(args, tokenizer)
@@ -320,6 +494,14 @@ if __name__ == "__main__":
             tokenizer,
             args
         )
+        if args.calculate_metrics:
+            rouge_score = evaluate_metrics(
+                model,
+                test_set,
+                tokenizer,
+                args
+            )
+            print(f"Test ROUGE-L: {rouge_score['rouge-l']['f']:.4f}")
         test_ppl = math.exp(test_loss)
 
         print(f"Test loss {test_loss:.3f}, Test ppl {test_ppl:.3f}.")
