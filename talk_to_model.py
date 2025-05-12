@@ -45,10 +45,10 @@ if __name__ == "__main__":
 
     print("Type your message to the chat bot below:")
     output_message = ''
-    while True:
+    input_str = ''
+    while input_str != 'exit':
         input_str = input(">>>")
-        input_message = f'{output_message}\nUser: {input_str}\nSystem:'
-        # input_message = input_str
+        input_message = f'User: {input_str}\nSystem:'
         input_message = tokenizer(input_message)
         input_message = mx.array(input_message['input_ids'][-args.max_context:])[None]
         output_message = []
