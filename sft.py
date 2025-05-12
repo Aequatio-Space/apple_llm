@@ -59,15 +59,20 @@ def loss(mdl, inputs, targets, input_lengths, target_lengths=None):
 
     # 确保logits和targets的维度匹配
     if logits.shape[1] > targets.shape[1]:
-        # 截断logits到targets的长度
-        logits = logits[:, :targets.shape[1], :]
+        # pad target to logits length
+        pad_length = logits.shape[1] - targets.shape[1]
+        targets = mx.concatenate(
+            [targets, mx.full((targets.shape[0], pad_length),
+                              dtype=targets.dtype, vals=2)],
+            axis=1
+        )
     elif logits.shape[1] < targets.shape[1]:
         # 这种情况通常不应该发生，因为模型输出应该至少和输入一样长
         raise ValueError(f"Logits长度({logits.shape[1]})小于targets长度({targets.shape[1]})")
 
     # 创建目标序列的掩码
     # 注意：这里使用target_lengths而不是input_lengths
-    target_mask = mx.arange(targets.shape[1])[None, :] < target_lengths[:, None]
+    target_mask = targets != 2
 
     # 处理特殊的填充标记(-100)
     if -100 in targets[0]:
