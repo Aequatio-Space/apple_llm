@@ -7,8 +7,6 @@ Much of the code here is adapted, inspired by, or copied directly from [HuggingF
 This repo supports PEFT with [soft-prompts](https://arxiv.org/pdf/2104.08691v2.pdf) and with [LoRA](https://arxiv.org/pdf/2106.09685.pdf). The example works with Llama and Mistral style models
 available on Hugging Face, though I have only really tested on Llama style models.
 
-There are two examples here, one for getting a TinyLlama to [generate digits that conform to some sequence guidelines](sequential_digits.md) (such as increasing even numbers), and one for [training a chatbot on your iMessage history](imessage_bot.md) (still a work-in-progress).
-
 There is an accompanying PyTorch implementation of everything in this repo, inside of the `pytorch_baseline` directory.
 
 ## Running
