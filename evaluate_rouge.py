@@ -6,9 +6,14 @@ from tqdm import tqdm
 from transformers import pipeline
 import torch
 
+"""
+
+"""
 
 def main(args):
     # 初始化pipeline
+    import datetime
+    date_string = datetime.datetime.now().strftime("%m%d-%H%M%S")
     pipe = pipeline(
         "text-generation",
         model=args.model_name,
@@ -32,9 +37,9 @@ def main(args):
     print(f"Evaluating {len(data)} samples...")
 
     # 生成预测并收集结果
-    for example in tqdm(data[:10]):
-        input_text = example["text"]
-        target_text = example["text"]
+    for example in tqdm(data[:100]):
+        input_text = example["input"]
+        target_text = example["target"]
         if args.add_template:
             messages = [
                 {
@@ -75,14 +80,14 @@ def main(args):
 
         # 保存结果
         if args.output_file:
-            with open(args.output_file, 'w', encoding='utf-8') as f:
+            with open(f'{date_string}_{args.output_file}', 'w', encoding='utf-8') as f:
                 json.dump(scores, f, indent=4)
             print(f"Scores saved to {args.output_file}")
 
             # 保存详细结果
             if args.save_details:
                 details_file = args.output_file.replace('.json', '_details.json')
-                with open(details_file, 'w', encoding='utf-8') as f:
+                with open(f'{date_string}_{details_file}', 'w', encoding='utf-8') as f:
                     json.dump([
                         {"prediction": pred, "reference": ref}
                         for pred, ref in zip(predictions, references)
