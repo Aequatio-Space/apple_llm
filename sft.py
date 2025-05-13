@@ -38,60 +38,30 @@ python sft.py --reward-model --train --data-base reward_function_increasing_mult
 """
 
 
-def loss(mdl, inputs, targets, input_lengths, target_lengths=None):
+def loss(mdl, inputs, targets, lengths):
     """
     SFT loss, standard language modeling cross-entropy loss
-    支持input和target长度不一致的情况
-
-    参数:
-        mdl: 模型
-        inputs: 输入序列
-        targets: 目标序列
-        input_lengths: 输入序列的有效长度
-        target_lengths: 目标序列的有效长度(可选，默认为input_lengths)
+    Returns:
+        Loss value, tokens-per-second
     """
-    # 如果未提供目标长度，则默认为输入长度
-    if target_lengths is None:
-        target_lengths = input_lengths
+    # Run model on inputs
+    logits = mdl(inputs)
 
-    # 运行模型获取logits
-    logits, _, _ = mdl(inputs)
+    # Mask padding tokens
+    length_mask = mx.arange(inputs.shape[1])[None, :] < lengths[:, None]
 
-    # 确保logits和targets的维度匹配
-    if logits.shape[1] > targets.shape[1]:
-        # pad target to logits length
-        pad_length = logits.shape[1] - targets.shape[1]
-        targets = mx.concatenate(
-            [targets, mx.full((targets.shape[0], pad_length),
-                              dtype=targets.dtype, vals=2)],
-            axis=1
-        )
-    elif logits.shape[1] < targets.shape[1]:
-        # 这种情况通常不应该发生，因为模型输出应该至少和输入一样长
-        raise ValueError(f"Logits长度({logits.shape[1]})小于targets长度({targets.shape[1]})")
+    if -100 in targets[0]:  # If we are masking some targets
+        # Cast to numpy because mlx doesn't support boolean indexing
+        np_len = np.array(length_mask)
+        # Mask out targets
+        np_len[targets == -100] = False
+        # Cast back to mlx
+        length_mask = mx.array(np_len)
 
-    # 创建目标序列的掩码
-    # 注意：这里使用target_lengths而不是input_lengths
-    target_mask = targets != 2
-
-    # 处理特殊的填充标记(-100)
-    if -100 in targets[0]:
-        # 将标记为-100的位置从掩码中排除
-        target_mask = target_mask & (targets != -100)
-
-    # 计算交叉熵损失
-    # 注意：logits和targets现在可能具有不同的长度，但我们已经截断了logits
-    ce = nn.losses.cross_entropy(logits, targets) * target_mask
-
-    # 计算有效token数
-    ntoks = target_mask.sum()
-
-    # 计算平均损失
-    if ntoks == 0:
-        return mx.array(0.0), ntoks  # 避免除零错误
-    else:
-        ce = ce.sum() / ntoks
-
+    # Calculate the loss
+    ce = nn.losses.cross_entropy(logits, targets) * length_mask
+    ntoks = length_mask.sum()
+    ce = ce.sum() / ntoks
     return ce, ntoks
 
 
@@ -560,7 +530,7 @@ if __name__ == "__main__":
 
     np.random.seed(args.seed)
 
-    model, tokenizer = get_model_and_tokenizer(args, need_generate=True)
+    model, tokenizer = get_model_and_tokenizer(args, need_generate=args.calculate_metrics)
 
     print("Loading datasets")
     train_set, valid_set, test_set = load_datasets(args, tokenizer)
@@ -598,14 +568,6 @@ if __name__ == "__main__":
             tokenizer,
             args
         )
-        if args.calculate_metrics:
-            rouge_score = evaluate_metrics(
-                model,
-                test_set,
-                tokenizer,
-                args
-            )
-            print(f"Test ROUGE-L: {rouge_score['rouge-l']['f']:.4f}")
         test_ppl = math.exp(test_loss)
 
         print(f"Test loss {test_loss:.3f}, Test ppl {test_ppl:.3f}.")
