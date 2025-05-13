@@ -6,6 +6,13 @@ import json
 """
 python generate_digit_data.py --increasing --multiple-of 2 --num-samples 150
 """
+
+def apply_chat_template(text, system_prompt="You are a helpful, creative, accurate, and harmless AI assistant."):
+    """将文本应用到聊天模板中"""
+    # 转义双引号和换行符
+    formatted_text=f"""|system|\n{system_prompt}\n|user|\n{text}\n|assistant:"""
+    return formatted_text.replace('"', '\\"').replace('\n', '\\n')
+
 def build_data_gen_parser():
     parser = argparse.ArgumentParser(description="Synthetic digit generation dataset generation.")
     # Generation args
@@ -88,12 +95,12 @@ if __name__ == "__main__":
         filename_prefix += 'increasing_'
     elif args.decreasing:
         filename_prefix += 'decreasing_'
-    filename_prefix += f'mult_{args.multiple_of}_'
+    filename_prefix += f'mult_{args.multiple_of}_template_'
     for ds, name in zip([train_data, val_data, test_data], ['train', 'valid', 'test']):
-        dict_ds = [{"text": x,
-                    "reward": str(reward_fn(x)[0])} for x in ds]
 
         with open(f'./{filename_prefix}{name}.jsonl', 'w') as fp:
             for x in ds:
-                new_str = '{"text": "' + x + '", "reward": "' + str(reward_fn(x)[0]) + '"}\n'
+                # 应用聊天模板并转义特殊字符
+                escaped_text = apply_chat_template(x)
+                new_str = f'{{"text": "{escaped_text}", "reward": "{str(reward_fn(x)[0])}"}}\n'
                 fp.write(new_str)

@@ -52,7 +52,8 @@ To fine-tune a model use:
 ```
 python sft.py --model <path_to_model> \
                --train \
-               --iters 600
+               --iters 600 \
+               --data-base increasing_mult_1_
                --save-file lora_weights.npz
 ```
 
