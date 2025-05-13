@@ -16,6 +16,7 @@ class TuningDataset:
     def __init__(self, path: Path, key: str = "text"):
         if not path.exists():
             self._data = None
+            raise FileNotFoundError(f"File {path} not found")
         else:
             with open(path, "r") as fid:
                 self._data = [json.loads(l) for l in fid]
@@ -218,4 +219,7 @@ def build_parser():
         help="Number of test set batches, -1 uses the entire test set.",
     )
     arg_parse.add_argument("--seed", type=int, default=0, help="The PRNG seed")
+    arg_parse.add_argument('--calculate_metrics', action='store_true', help='Whether to calculate ROUGE and BLEU metrics',
+                        default=False)
+    arg_parse.add_argument('--max_gen_length', type=int, help='Maximum generation length', default=128)
     return arg_parse
