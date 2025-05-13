@@ -5,7 +5,9 @@ from pathlib import Path
 from transformers import AutoTokenizer
 
 
-def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000, model_name="meta-llama/Llama-2-7b-hf"):
+def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000,
+                             model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+                             system_prompt="You will receive a text. Your task is to extract keywords and topic from it."):
     """
     从Parquet文件中提取指定字段并保存为JSONL格式，同时构建对话模板
 
@@ -25,7 +27,7 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000, mode
         output_path = input_file.with_name(f"{input_file.stem}.jsonl")
 
     # 定义要提取的字段
-    selected_fields = ["text", "keywords", "topic"]
+    selected_fields = ['instruction', 'output', 'input']
 
     try:
         # 加载tokenizer用于构建对话模板
@@ -57,14 +59,13 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000, mode
                     messages = [
                         {
                             "role": "system",
-                            "content": "You will receive a text. Your task is to extract keywords and topic from it."
+                            "content": system_prompt,
                         },
                         {
                             "role": "user",
-                            "content": str(row["text"])  # 确保text为字符串类型
-                        }
+                            "content": str(row["instruction"]) + f'\\<|input|>{str(row["input"])}</s>'  # 确保text为字符串类型
+                        },
                     ]
-
                     # 使用tokenizer的对话模板功能
                     try:
                         # 构建包含特殊标记的输入文本
@@ -72,11 +73,13 @@ def process_parquet_to_jsonl(input_path, output_path=None, batch_size=1000, mode
                     except Exception as e:
                         # 如果tokenizer不支持apply_chat_template，手动构建
                         print(f"警告: tokenizer不支持apply_chat_template，使用手动构建: {e}")
-                        input_text = f"<|system|>\n{messages[0]['content']}</s><|user|>\n{messages[1]['content']}</s><|assistant|>"
+                        input_text = f"<|system|>\n{messages[0]['content']}</s><|user|>\n{messages[1]['content']}</s>"
+                        if len(messages[2]['content']) > 0:
+                            input_text += '<|input|>\n' + messages[2]['content'] + '</s>'
+                        input_text += "<|assistant|>"
 
                     # 构建目标输出: "Keywords: XXX, Topic: XXX"
-                    target_text = f"Keywords: {row['keywords']}, Topic: {row['topic']}"
-
+                    target_text = row['output']
                     # 创建输出记录
                     record = {
                         "input": input_text,
@@ -112,4 +115,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 执行转换
-    process_parquet_to_jsonl(args.input, args.output, args.batch_size, args.model)
+    process_parquet_to_jsonl(args.input, args.output, args.batch_size,
+                             args.model, "Below is an instruction that describes a task. Write a response that appropriately completes the request.")

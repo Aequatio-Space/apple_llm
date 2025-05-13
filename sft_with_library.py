@@ -33,8 +33,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token  # 设置填充标记
 
 # 加载数据集
-data_files = {"train": "data/tech_topic_train.jsonl",
-              "valid": "data/tech_topic_valid.jsonl"}
+data_files = {"train": "data/alpaca_2000.jsonl"}
 dataset = load_dataset("json", data_files=data_files)
 
 
@@ -74,13 +73,14 @@ model.print_trainable_parameters()
 
 # 定义训练参数
 training_args = TrainingArguments(
-    output_dir="/Users/aequatio/147-大模型本地/results",
+    output_dir="/Users/aequatio/147-大模型本地/results_alpaca",
     learning_rate=2e-5,
-    per_device_train_batch_size=16,
+    optim="adamw_torch",
+    per_device_train_batch_size=4,
     per_device_eval_batch_size=4,
     num_train_epochs=8,
     weight_decay=0.01,
-    eval_steps=500,
+    eval_steps=100,
     save_strategy="steps",
     save_steps=100,
     logging_dir="./logs",
@@ -111,7 +111,7 @@ trainer = Trainer(
 )
 wandb.init(
     project="RLAIF",
-    name="test-run",
+    name="test-run-alpaca-fix-data",
     tags=["baseline"],
     group="llama",
 )
@@ -119,8 +119,8 @@ wandb.init(
 trainer.train()
 
 # 保存微调后的模型
-model.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-large-batch")
-tokenizer.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-large-batch")
+model.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-alpaca-fix")
+tokenizer.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-alpaca-fix")
 
 # 保存LoRA权重（更小的文件）
-model.base_model.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-large-batch")
+model.base_model.save_pretrained("/Users/aequatio/147-大模型本地/tinyllama-alpaca-fix")
